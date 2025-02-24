@@ -1,0 +1,8 @@
+[package]
+name = "frekeyency"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+evdev = "0.13.0"
+xkbcommon = "0.8.0"
