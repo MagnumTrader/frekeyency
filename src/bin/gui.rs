@@ -13,6 +13,7 @@ fn main() -> Result<()> {
             let read = std::io::stdin()
                 .read(&mut buf)
                 .expect("failed to read stdin");
+            ctx.request_repaint();
 
             egui::CentralPanel::default().show(ctx, |ui| {
                 let s = format!("{}", String::from_utf8_lossy(&buf[..read]));
