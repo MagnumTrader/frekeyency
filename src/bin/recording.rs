@@ -10,14 +10,17 @@ use std::{
     thread,
     time::Duration,
 };
+
 // TODO: chars that can be combined are named DEAD_X, example DEAD_CIRCUMFLEX for ^
 // or DEAD_TILDE for ~, this is because they can be combined to create â or ñ,
 // therefore they dont send chars, fix this later by catching the variant for "dead keys"
+
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 /// char offset to convert from evdev to xkbcommon
 const XKB_OFFSET: u16 = 8;
 
+// Used to implement the drop trait to kill the process
 struct AppChild {
     child: Child,
     pipe: ChildStdin,
@@ -114,22 +117,36 @@ pub fn pick_device() -> evdev::Device {
         evdev::Device::open(dev_string).unwrap()
     } else {
         //TODO: Make this into its own function to be able to use the command line
-        let mut devices = evdev::enumerate().map(|t| t.1).collect::<Vec<_>>();
+        let mut devices: Vec<_> = evdev::enumerate().map(|t| t.1).collect();
         devices.reverse();
         for (i, d) in devices.iter().enumerate() {
             println!("{}: {}", i, d.name().unwrap_or("Unnamed device"));
         }
-        print!("Select the device [0-{}]: ", devices.len());
+        print!("Select the device [0-{}]: ", devices.len() - 1);
         let _ = std::io::stdout().flush();
+
         let mut chosen = String::new();
-        std::io::stdin().read_line(&mut chosen).unwrap();
-        let n = chosen.trim().parse::<usize>().unwrap();
+        let n = loop {
+            chosen.clear();
+            std::io::stdin().read_line(&mut chosen).unwrap();
+
+            match chosen.trim().parse::<usize>() {
+                Ok(n) if n < devices.len() => break n,
+                _ => {
+                    eprintln!(
+                        "ERROR: failed to parse number, enter a number between [0-{}]",
+                        devices.len() - 1
+                    );
+                }
+            }
+        };
         devices.into_iter().nth(n).unwrap()
     }
 }
 
-// HACK: Egui must run i the mainthread and xkbcommon or evdev to work properly, dont remember which
-// therefore we spawn another process instead of using a thread.
+// HACK: Egui must run i the mainthread, this is also a requirement for
+// xkbcommon or evdev to work properly, dont remember which.
+// Therefore we spawn another process instead of using a thread.
 fn spawn_window() -> AppChild {
     let mut command = std::process::Command::new("./target/debug/gui");
     let mut child = command
