@@ -7,12 +7,7 @@ use xkbcommon::xkb::{
     STATE_MODS_DEPRESSED,
 };
 
-use std::{
-    io::Write,
-    process::{Child, ChildStdin, Stdio},
-    thread,
-    time::Duration,
-};
+use std::{process::Stdio, thread, time::Duration};
 
 // NOTE: chars that can be combined are named DEAD_X, example DEAD_CIRCUMFLEX for ^
 // or DEAD_TILDE for ~, this is because they can be combined to create â or ñ,
@@ -21,19 +16,6 @@ type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 /// char offset to convert from evdev to xkbcommon
 const XKB_OFFSET: u16 = 8;
-
-// Used to implement the drop trait to kill the process
-struct AppChild {
-    child: Child,
-    pipe: ChildStdin,
-}
-
-impl Drop for AppChild {
-    fn drop(&mut self) {
-        self.child.kill().expect("failed to kill child process");
-        self.child.wait().expect("failed to wait for child exit");
-    }
-}
 
 fn main() -> Result<()> {
     // pick a device
@@ -54,54 +36,52 @@ fn main() -> Result<()> {
 
     let mut state = xkb::State::new(&keymap);
 
-    let mut child = spawn_gui();
+    //let mut child = spawn_gui();
 
     'outer: loop {
         for event in dev.fetch_events().expect("failed to get events") {
-            if let EventSummary::Key(_, code, value) = event.destructure() {
-                let keycode: XkbKeyCode = (code.0 + XKB_OFFSET).into();
-                let Some(dir) = direction(value) else {
-                    continue;
-                };
+            let EventSummary::Key(_, code, value) = event.destructure() else {
+                continue;
+            };
 
-                let _changes = state.update_key(keycode, dir);
+            let keycode: XkbKeyCode = (code.0 + XKB_OFFSET).into();
 
-                // HACK: Escape is doing something to our state,
-                //       So we remove it for now
-                if code == EvDevKeyCode::KEY_ESC {
-                    if state.mod_name_is_active(MOD_NAME_CTRL, 0) {
-                        break 'outer;
-                    }
-                    continue;
-                }
+            let Some(dir) = direction(value) else {
+                continue;
+            };
 
-                // Only register on press
-                if value == 1 {
-                    let symbol = match state.key_get_one_sym(keycode) {
-                        Keysym::dead_circumflex => '^',
-                        Keysym::dead_grave => '´',
-                        Keysym::dead_acute => '`',
-                        Keysym::dead_tilde => '~',
-                        sym => {
-                            let Some(c) = sym.key_char() else {
-                                continue;
-                            };
-                            c
-                        }
+            state.update_key(keycode, dir);
+
+            // HACK: Escape is doing something to our state,
+            //       So we remove it for now
+            if value != 1 || code == EvDevKeyCode::KEY_ESC {
+                continue;
+            }
+
+            let symbol = match state.key_get_one_sym(keycode) {
+                Keysym::dead_circumflex => '^',
+                Keysym::dead_grave => '´',
+                Keysym::dead_acute => '`',
+                Keysym::dead_tilde => '~',
+                sym => {
+                    let Some(c) = sym.key_char() else {
+                        continue;
                     };
 
-                    child
-                        .pipe
-                        .write_all(&[symbol as u8]) // assumes valid utf8/ should we fix this?
-                        .expect("could not write to gui child process");
+                    if c == 'q' && state.mod_name_is_active(MOD_NAME_CTRL, STATE_MODS_DEPRESSED) {
+                        break 'outer;
+                    }
+                    c
                 }
-            }
+            };
+            println!("{symbol}");
         }
         thread::sleep(Duration::from_millis(10));
     }
     Ok(())
 }
 
+#[inline]
 const fn direction(i: i32) -> Option<KeyDirection> {
     match i {
         1 => Some(KeyDirection::Down),
@@ -136,8 +116,7 @@ fn get_mod_string(state: &xkb::State) -> String {
 
 fn pick_device() -> evdev::Device {
     use std::io::prelude::*;
-    // TODO: Make this into a config file to load settings for the
-    // applications to record and also the devices
+
     let mut args = std::env::args_os();
     args.next();
     if let Some(dev_file) = args.next() {
@@ -145,7 +124,9 @@ fn pick_device() -> evdev::Device {
         println!("{dev_string}");
         evdev::Device::open(dev_string).unwrap()
     } else {
-        //TODO: Make this into its own function to be able to use the command line
+        // TODO:
+        // Make this into its own function to be able to use in multiple places,
+        // like the gui for example.
         let mut devices: Vec<_> = evdev::enumerate().map(|t| t.1).collect();
         devices.reverse();
         for (i, d) in devices.iter().enumerate() {
@@ -171,29 +152,4 @@ fn pick_device() -> evdev::Device {
         };
         devices.into_iter().nth(n).unwrap()
     }
-}
-
-// HACK: Egui must run i the mainthread, this is also a requirement for
-// xkbcommon or evdev to work properly, dont remember which.
-// Therefore we spawn another process instead of using a thread.
-fn spawn_gui() -> AppChild {
-    let mut command = std::process::Command::new("./target/debug/gui");
-
-    let mut child = command
-        .stdin(Stdio::piped())
-        .spawn()
-        .expect("failed to spawn UI process");
-
-    let pipe = match child.stdin.take() {
-        Some(pipe) => pipe,
-        None => {
-            // needed to not not leave a ghost process.
-            // implemented in the drop function of AppChild
-            child.kill().expect("failed to kill child process");
-            child.wait().expect("failed to await child process");
-            panic!("failed to take standard in from gui process")
-        }
-    };
-
-    AppChild { child, pipe }
 }
