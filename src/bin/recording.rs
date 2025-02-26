@@ -1,13 +1,10 @@
-// TODO: next i need the gui to display the presses in a list instead of what it is now
-// TODO: Add small DSL/arguements to specify what type of symbols you want
-
 use evdev::{EventSummary, KeyCode as EvDevKeyCode};
 use xkbcommon::xkb::{
     self, KeyDirection, Keycode as XkbKeyCode, Keysym, MOD_NAME_ALT, MOD_NAME_CTRL, MOD_NAME_SHIFT,
     STATE_MODS_DEPRESSED,
 };
 
-use std::{process::Stdio, thread, time::Duration};
+use std::{thread, time::Duration};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
@@ -17,8 +14,6 @@ const XKB_OFFSET: u16 = 8;
 fn main() -> Result<()> {
 
     let mut dev = frekeyency::pick_device(std::env::args());
-
-    // Initialize xkbcommon for key translation
     let context = xkb::Context::new(xkb::CONTEXT_NO_FLAGS);
 
     // TODO:
@@ -32,8 +27,6 @@ fn main() -> Result<()> {
             .expect("Failed to load keymap");
 
     let mut state = xkb::State::new(&keymap);
-
-    //let mut child = spawn_gui();
 
     'outer: loop {
         for event in dev.fetch_events().expect("failed to get events") {
