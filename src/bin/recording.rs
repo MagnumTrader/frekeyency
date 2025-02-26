@@ -1,3 +1,6 @@
+// TODO: next i need the gui to display the presses in a list instead of what it is now
+// TODO: Add small DSL/arguements to specify what type of symbols you want 
+
 use evdev::{EventSummary, KeyCode as EvDevKeyCode};
 use xkbcommon::xkb::{
     self, KeyDirection, Keycode as XkbKeyCode, MOD_NAME_ALT, MOD_NAME_CTRL, MOD_NAME_SHIFT,
@@ -53,7 +56,6 @@ fn main() -> Result<()> {
 
     let mut child = spawn_gui();
 
-    // get all the event and print them.
     'outer: loop {
         for event in dev.fetch_events().expect("failed to get events") {
             if let EventSummary::Key(_, code, value) = event.destructure() {
@@ -74,18 +76,13 @@ fn main() -> Result<()> {
                 }
 
                 let sym = state.key_get_one_sym(keycode);
-                if !sym.is_modifier_key() && value == 1 {
-                    let mut mod_string = get_mod_string(&state);
-                    let symbol = state.key_get_utf8((code.0 + XKB_OFFSET).into());
 
-                    if !mod_string.is_empty() {
-                        mod_string.push(' ');
-                    }
-                    mod_string.push_str(&symbol);
-                    println!("{mod_string}");
+                if !sym.is_modifier_key() && value == 1 {
+                    let symbol = state.key_get_utf8(keycode);
+
                     child
                         .pipe
-                        .write_all(mod_string.as_bytes())
+                        .write_all(symbol.as_bytes())
                         .expect("could not write to gui child process");
                 }
             }
@@ -105,8 +102,9 @@ const fn direction(i: i32) -> Option<KeyDirection> {
     }
 }
 
+// Could be used later, right now im interested in all the symbols i use
+#[allow(unused)]
 fn get_mod_string(state: &xkb::State) -> String {
-
     let mods = [
         (MOD_NAME_SHIFT, "Shift"),
         (MOD_NAME_CTRL, "Ctrl"),
