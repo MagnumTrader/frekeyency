@@ -9,9 +9,6 @@ use xkbcommon::xkb::{
 
 use std::{process::Stdio, thread, time::Duration};
 
-// NOTE: chars that can be combined are named DEAD_X, example DEAD_CIRCUMFLEX for ^
-// or DEAD_TILDE for ~, this is because they can be combined to create â or ñ,
-// therefore they dont send chars, fix this later by catching the variant for "dead keys"
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 /// char offset to convert from evdev to xkbcommon
