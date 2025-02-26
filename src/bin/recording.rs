@@ -1,20 +1,19 @@
-#![allow(unused, unreachable_code)]
-
-use evdev::{Device, KeyCode};
-use xkbcommon::xkb::{self, Context, KeyDirection, Keycode};
+use evdev::{EventSummary, KeyCode as EvDevKeyCode};
+use xkbcommon::xkb::{
+    self, KeyDirection, Keycode as XkbKeyCode, MOD_NAME_ALT, MOD_NAME_CTRL, MOD_NAME_SHIFT,
+    STATE_MODS_DEPRESSED,
+};
 
 use std::{
-    fs,
     io::Write,
     process::{Child, ChildStdin, Stdio},
     thread,
     time::Duration,
 };
 
-// TODO: chars that can be combined are named DEAD_X, example DEAD_CIRCUMFLEX for ^
+// NOTE: chars that can be combined are named DEAD_X, example DEAD_CIRCUMFLEX for ^
 // or DEAD_TILDE for ~, this is because they can be combined to create â or ñ,
 // therefore they dont send chars, fix this later by catching the variant for "dead keys"
-
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 /// char offset to convert from evdev to xkbcommon
@@ -46,54 +45,53 @@ fn main() -> Result<()> {
     //
     // xkb::Keymap::new_from_string()
     // https://xkbcommon.org/doc/current/group__keymap.html#ga502717aa7148fd17d4970896f1e9e06f
-    let keymap = xkb::Keymap::new_from_names(
-        &context,
-        "",
-        "105",
-        "se",
-        "",
-        None, // Default layout
-        xkb::COMPILE_NO_FLAGS,
-    )
-    .expect("Failed to load keymap");
+    let keymap =
+        xkb::Keymap::new_from_names(&context, "", "105", "se", "", None, xkb::COMPILE_NO_FLAGS)
+            .expect("Failed to load keymap");
 
     let mut state = xkb::State::new(&keymap);
 
-    let mut child = spawn_window();
+    let mut child = spawn_gui();
 
     // get all the event and print them.
     'outer: loop {
         for event in dev.fetch_events().expect("failed to get events") {
-            if let evdev::EventSummary::Key(event, code, value) = event.destructure() {
-                // HACK: Escape is doing something to our state,
-                //       So we remove it for now
-                if code == KeyCode::KEY_ESC {
-                    continue;
-                }
-
-                let keycode = (code.0 + XKB_OFFSET).into();
+            if let EventSummary::Key(_, code, value) = event.destructure() {
+                let keycode: XkbKeyCode = (code.0 + XKB_OFFSET).into();
                 let Some(dir) = direction(value) else {
                     continue;
                 };
 
-                state.update_key(keycode, dir);
+                let _changes = state.update_key(keycode, dir);
 
-                // check if we should get more syms for the logging?
-                // how should the logging look?
-                // maybe should be more, where is the debug?
+                // HACK: Escape is doing something to our state,
+                //       So we remove it for now
+                if code == EvDevKeyCode::KEY_ESC {
+                    if state.mod_name_is_active(MOD_NAME_CTRL, 0) {
+                        break 'outer;
+                    }
+                    continue;
+                }
+
                 let sym = state.key_get_one_sym(keycode);
                 if !sym.is_modifier_key() && value == 1 {
-                    let x = state.key_get_utf8((code.0 + 8).into());
-                    /// this doesnt print '"'
-                    ///
-                    child.pipe.write_all(x.as_bytes());
-                    println!("sym {sym:?} you sent: {x}");
+                    let mut mod_string = get_mod_string(&state);
+                    let symbol = state.key_get_utf8((code.0 + XKB_OFFSET).into());
+
+                    if !mod_string.is_empty() {
+                        mod_string.push(' ');
+                    }
+                    mod_string.push_str(&symbol);
+                    println!("{mod_string}");
+                    child
+                        .pipe
+                        .write_all(mod_string.as_bytes())
+                        .expect("could not write to gui child process");
                 }
             }
         }
         thread::sleep(Duration::from_millis(10));
     }
-
     Ok(())
 }
 
@@ -101,14 +99,37 @@ const fn direction(i: i32) -> Option<KeyDirection> {
     match i {
         1 => Some(KeyDirection::Down),
         0 => Some(KeyDirection::Up),
+        // 2 can be returned if we are holding a key,
+        // dont know if
         _ => None,
     }
 }
 
-pub fn pick_device() -> evdev::Device {
+fn get_mod_string(state: &xkb::State) -> String {
+
+    let mods = [
+        (MOD_NAME_SHIFT, "Shift"),
+        (MOD_NAME_CTRL, "Ctrl"),
+        (MOD_NAME_ALT, "Alt"),
+    ];
+
+    let mut mod_string = String::new();
+
+    for m in mods.iter() {
+        if state.mod_name_is_active(m.0, STATE_MODS_DEPRESSED) {
+            if !mod_string.is_empty() {
+                mod_string.push_str(" + ");
+            }
+            mod_string.push_str(m.1);
+        };
+    }
+    mod_string
+}
+
+fn pick_device() -> evdev::Device {
     use std::io::prelude::*;
     // TODO: Make this into a config file to load settings for the
-    // windows to record and also the devices
+    // applications to record and also the devices
     let mut args = std::env::args_os();
     args.next();
     if let Some(dev_file) = args.next() {
@@ -147,17 +168,18 @@ pub fn pick_device() -> evdev::Device {
 // HACK: Egui must run i the mainthread, this is also a requirement for
 // xkbcommon or evdev to work properly, dont remember which.
 // Therefore we spawn another process instead of using a thread.
-fn spawn_window() -> AppChild {
+fn spawn_gui() -> AppChild {
     let mut command = std::process::Command::new("./target/debug/gui");
+
     let mut child = command
         .stdin(Stdio::piped())
         .spawn()
         .expect("failed to spawn UI process");
 
-    let mut pipe = match child.stdin.take() {
+    let pipe = match child.stdin.take() {
         Some(pipe) => pipe,
         None => {
-            // needed to not not leave a ghost process
+            // needed to not not leave a ghost process.
             // implemented in the drop function of AppChild
             child.kill().expect("failed to kill child process");
             child.wait().expect("failed to await child process");
