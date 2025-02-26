@@ -1,27 +1,39 @@
 #![allow(unused, unreachable_code)]
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 use egui;
+use evdev::Device;
 
 use std::{
     io::Read,
     process::{Child, ChildStdout, Stdio},
+    sync::mpsc,
 };
 
 fn main() -> Result<()> {
-
-    let mut buf = [0; 8];
-    let mut child = spawn_key_reader();
+    let mut rx = spawn_reader();
+    let mut last_string = String::default();
+    let devices = frekeyency::list_devices();
+    let device: Option<Device> = None;
 
     eframe::run_simple_native(
         "dev",
         eframe::NativeOptions::default(),
         move |ctx, frame| {
-            let read = child.pipe.read(&mut buf).unwrap();
             ctx.request_repaint();
-
             egui::CentralPanel::default().show(ctx, |ui| {
-                let s = format!("{}", String::from_utf8_lossy(&buf[..read]));
-                let s = egui::RichText::new(s).size(32.0);
+                egui::containers::ComboBox::from_label("Select a device!").show_ui(ui, |ui| {
+                    for device in &devices {
+                        if let Some(name) = device.name() {
+                            if ui.button(name).clicked() {
+                                println!("clicked: {name}");
+                            }
+                        }
+                    }
+                });
+                if let Ok(s) = rx.try_recv() {
+                    last_string = s;
+                }
+                let s = egui::RichText::new(&last_string).size(32.0);
                 ui.label(s);
             });
         },
@@ -29,9 +41,22 @@ fn main() -> Result<()> {
     Ok(())
 }
 
+fn spawn_reader() -> mpsc::Receiver<String> {
+    let mut child = spawn_key_reader();
+    let (tx, rx) = mpsc::channel();
+    let mut buf = [0; 64];
+    std::thread::spawn(move || loop {
+        let read = child.pipe.read(&mut buf).unwrap();
+        if let Err(x) = tx.send(String::from_utf8_lossy(&buf[..read]).to_string()) {
+            break;
+        };
+    });
+    rx
+}
+
 // HACK:
 // I would like to spawn this as a seperate thread,
-// Egui must run i the mainthread, this is also a requirement for
+// but egui must run i the mainthread, this is also a requirement for
 // xkbcommon or evdev to work properly, dont remember which.
 // Therefore we spawn another process instead of using a thread and
 // listen to Stdout of that process
