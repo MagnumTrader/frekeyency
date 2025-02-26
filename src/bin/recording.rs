@@ -1,9 +1,9 @@
 // TODO: next i need the gui to display the presses in a list instead of what it is now
-// TODO: Add small DSL/arguements to specify what type of symbols you want 
+// TODO: Add small DSL/arguements to specify what type of symbols you want
 
 use evdev::{EventSummary, KeyCode as EvDevKeyCode};
 use xkbcommon::xkb::{
-    self, KeyDirection, Keycode as XkbKeyCode, MOD_NAME_ALT, MOD_NAME_CTRL, MOD_NAME_SHIFT,
+    self, KeyDirection, Keycode as XkbKeyCode, Keysym, MOD_NAME_ALT, MOD_NAME_CTRL, MOD_NAME_SHIFT,
     STATE_MODS_DEPRESSED,
 };
 
@@ -75,14 +75,24 @@ fn main() -> Result<()> {
                     continue;
                 }
 
-                let sym = state.key_get_one_sym(keycode);
-
-                if !sym.is_modifier_key() && value == 1 {
-                    let symbol = state.key_get_utf8(keycode);
+                // Only register on press
+                if value == 1 {
+                    let symbol = match state.key_get_one_sym(keycode) {
+                        Keysym::dead_circumflex => '^',
+                        Keysym::dead_grave => '´',
+                        Keysym::dead_acute => '`',
+                        Keysym::dead_tilde => '~',
+                        sym => {
+                            let Some(c) = sym.key_char() else {
+                                continue;
+                            };
+                            c
+                        }
+                    };
 
                     child
                         .pipe
-                        .write_all(symbol.as_bytes())
+                        .write_all(&[symbol as u8]) // assumes valid utf8/ should we fix this?
                         .expect("could not write to gui child process");
                 }
             }
