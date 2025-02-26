@@ -12,7 +12,6 @@ type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 const XKB_OFFSET: u16 = 8;
 
 fn main() -> Result<()> {
-
     let mut dev = frekeyency::pick_device(std::env::args());
     let context = xkb::Context::new(xkb::CONTEXT_NO_FLAGS);
 

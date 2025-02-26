@@ -11,7 +11,7 @@ pub fn pick_device(mut args: std::env::Args) -> evdev::Device {
     } else {
         let devices = list_devices();
 
-        if devices.len() <= 0 {
+        if devices.is_empty() {
             panic!("No devices found, did you the program with sudo?")
         }
 

@@ -1,6 +1,4 @@
-#![allow(unused, unreachable_code)]
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
-use egui;
 use evdev::Device;
 
 use std::{
@@ -10,34 +8,30 @@ use std::{
 };
 
 fn main() -> Result<()> {
-    let mut rx = spawn_reader();
+    let rx = spawn_reader();
     let mut last_string = String::default();
     let devices = frekeyency::list_devices();
-    let device: Option<Device> = None;
+    let _device: Option<Device> = None;
 
-    eframe::run_simple_native(
-        "dev",
-        eframe::NativeOptions::default(),
-        move |ctx, frame| {
-            ctx.request_repaint();
-            egui::CentralPanel::default().show(ctx, |ui| {
-                egui::containers::ComboBox::from_label("Select a device!").show_ui(ui, |ui| {
-                    for device in &devices {
-                        if let Some(name) = device.name() {
-                            if ui.button(name).clicked() {
-                                println!("clicked: {name}");
-                            }
+    let _ = eframe::run_simple_native("dev", eframe::NativeOptions::default(), move |ctx, _| {
+        ctx.request_repaint();
+        egui::CentralPanel::default().show(ctx, |ui| {
+            egui::containers::ComboBox::from_label("Select a device!").show_ui(ui, |ui| {
+                for device in &devices {
+                    if let Some(name) = device.name() {
+                        if ui.button(name).clicked() {
+                            println!("clicked: {name}");
                         }
                     }
-                });
-                if let Ok(s) = rx.try_recv() {
-                    last_string = s;
                 }
-                let s = egui::RichText::new(&last_string).size(32.0);
-                ui.label(s);
             });
-        },
-    );
+            if let Ok(s) = rx.try_recv() {
+                last_string = s;
+            }
+            let s = egui::RichText::new(&last_string).size(32.0);
+            ui.label(s);
+        });
+    });
     Ok(())
 }
 
@@ -47,7 +41,11 @@ fn spawn_reader() -> mpsc::Receiver<String> {
     let mut buf = [0; 64];
     std::thread::spawn(move || loop {
         let read = child.pipe.read(&mut buf).unwrap();
-        if let Err(x) = tx.send(String::from_utf8_lossy(&buf[..read]).to_string()) {
+        if tx
+            .send(String::from_utf8_lossy(&buf[..read]).to_string())
+            .is_err()
+        {
+            // Errors only when parent proces have closed
             break;
         };
     });
@@ -65,10 +63,10 @@ fn spawn_key_reader() -> AppChild {
     let mut command = std::process::Command::new("./target/debug/recording");
 
     let mut child = command
-        .arg("event15")
+        .arg("event15") // my current keyboard
         .stdout(Stdio::piped())
         .spawn()
-        .expect("failed to spawn UI process");
+        .expect("failed to spawn key reader");
 
     // Needed to not not leave a ghost process if we crash between
     // spawning the child and creating stdout
