@@ -7,7 +7,6 @@ pub fn pick_device(mut args: std::env::Args) -> evdev::Device {
     args.next();
     if let Some(dev_file) = args.next() {
         let dev_string = format!("/dev/input/{}", &dev_file);
-        println!("{dev_string}");
         evdev::Device::open(dev_string).unwrap()
     } else {
         let devices = list_devices();

@@ -19,8 +19,7 @@ const XKB_OFFSET: u16 = 8;
 
 fn main() -> Result<()> {
 
-    // pick a device, take args 
-    let mut dev = pick_device();
+    let mut dev = frekeyency::pick_device(std::env::args());
 
     // Initialize xkbcommon for key translation
     let context = xkb::Context::new(xkb::CONTEXT_NO_FLAGS);
@@ -113,4 +112,3 @@ fn get_mod_string(state: &xkb::State) -> String {
     }
     mod_string
 }
-
