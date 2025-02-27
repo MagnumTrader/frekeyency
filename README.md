@@ -5,3 +5,17 @@
 
  # Purpose
 The purpose of this program is for me to analyze patterns in occurence and sequence of symbols that are used when coding, and then design my symbol layer on the keyboard based on this.
+
+# Usage
+Now in the development phase you can run frekeyency by:
+```bash
+# Note the sudo here is required or else you wont get access to the /dev folder.
+cargo build --bin frekeyency && sudo ./target/debug/frekeyency <DEVICE>
+```
+
+To use the gui (work in progress):
+
+```bash
+# Note the sudo here is required or else you wont get access to the /dev folder.
+cargo build --bins && sudo ./target/debug/gui <DEVICE>
+```

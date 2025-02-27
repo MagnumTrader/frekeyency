@@ -8,6 +8,8 @@ use std::{
 };
 
 fn main() -> Result<()> {
+
+    // TODO: handle choosing device from the command line here
     let rx = spawn_reader();
     let mut last_string = String::default();
     let devices = frekeyency::list_devices();
