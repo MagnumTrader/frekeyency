@@ -1,5 +1,6 @@
 use evdev::Device;
 
+
 pub fn pick_device(mut args: std::env::Args) -> evdev::Device {
     use std::io::prelude::*;
 
@@ -43,5 +44,8 @@ pub fn pick_device(mut args: std::env::Args) -> evdev::Device {
 
 /// Lists all the devices in /dev/input
 pub fn list_devices() -> Vec<Device> {
-    evdev::enumerate().map(|t| t.1).collect()
+    let mut devices: Vec<Device> = evdev::enumerate().map(|t| t.1).collect();
+    // Devices gets listed in the opposite order of iteration
+    devices.reverse();
+    devices
 }
