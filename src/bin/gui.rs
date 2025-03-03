@@ -3,14 +3,13 @@ use eframe::App;
 use evdev::Device;
 
 use std::{
+    collections::VecDeque,
     io::Read,
     process::{Child, ChildStdout, Stdio},
     sync::mpsc::{self, Receiver},
 };
 
 /*
-* TODO: Make a running bool so that we can cancel logging
-*       should that exit the process. Stop
 * TODO: print symbols in a row instead of one at the time
 * TODO: create db connnection and start logging
 *       should we start logging in batches, with combos?
@@ -25,12 +24,12 @@ struct Frekeyency {
     device_index: Option<usize>,
     devices: Vec<Device>,
     rx: Option<Receiver<String>>, // current_combo
-    last_string: String,
+    last_string: VecDeque<String>,
 }
 
 impl App for Frekeyency {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
-        egui::CentralPanel::default().show(ctx, |ui| {
+        egui::TopBottomPanel::top("top").show(ctx, |ui| {
             ui.horizontal_top(|ui| {
                 let l = if self.paused { "record" } else { "pause" };
                 if ui.button(l).clicked() {
@@ -42,7 +41,7 @@ impl App for Frekeyency {
                 } else {
                     "select a device!"
                 };
-                egui::containers::ComboBox::from_label(d).show_ui(ui, |ui| {
+                egui::containers::ComboBox::new("device_picker", d).show_ui(ui, |ui| {
                     for (i, device) in self.devices.iter().enumerate() {
                         if let Some(name) = device.name() {
                             if ui
@@ -55,25 +54,45 @@ impl App for Frekeyency {
                             {
                                 ctx.request_repaint();
                                 self.rx = Some(spawn_frekeyency(&format!("event{}", i)));
-                                println!("clicked: {name}, selected: {:?}", &self.device_index);
+                                println!("{name} selected #{:?}", &self.device_index);
                             }
                         }
                     }
                 });
             });
+        });
 
+        egui::CentralPanel::default().show(ctx, |ui| {
             if let Some(s) = self.rx.as_mut() {
                 if let Ok(s) = s.try_recv() {
                     if self.paused {
                         // Explicit drop of string, no recording during pause.
                         drop(s);
                     } else {
-                        self.last_string.push_str(s.trim());
+                        self.last_string.push_front(s);
                     }
                 }
             }
-            let s =
-                egui::RichText::new(&self.last_string.chars().rev().collect::<String>()).size(32.0);
+
+            const FONT_SIZE: f32 = 32.0;
+
+            //TODO: this doesnt work on non monospaced fonts!
+            let width = if let Some(size) = ctx.input(|i| i.viewport().outer_rect) {
+                size.width() / (FONT_SIZE / 2.0)
+            } else {
+                0.0
+            };
+
+            self.last_string.truncate(
+                self.last_string.len() - (self.last_string.len().saturating_sub(width as usize)),
+            );
+
+            let s: String = self
+                .last_string
+                .iter()
+                .map(|s| s.chars().next().expect("expect one char"))
+                .collect();
+            let s = egui::RichText::new(s).size(FONT_SIZE);
             ui.label(s);
         });
     }
@@ -86,7 +105,7 @@ fn main() -> Result<()> {
         device_index: None,
         devices: frekeyency::list_devices(),
         rx: None,
-        last_string: String::new(),
+        last_string: VecDeque::new(),
     };
 
     let _ = eframe::run_native(
@@ -128,10 +147,11 @@ fn spawn_frekeyency(device_id: &str) -> mpsc::Receiver<String> {
     let (tx, rx) = mpsc::channel();
     let mut buf = [0; 64];
 
+    let _ = child.pipe.read(&mut buf);
     std::thread::spawn(move || loop {
         let read = child.pipe.read(&mut buf).unwrap();
         if tx
-            .send(String::from_utf8_lossy(&buf[..read]).to_string())
+            .send(String::from_utf8_lossy(&buf[..read]).trim().to_string())
             .is_err()
         {
             break;
